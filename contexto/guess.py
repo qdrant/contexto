@@ -1,5 +1,6 @@
 import os
 import random
+from typing import Tuple, List
 
 import numpy as np
 from sklearn.metrics.pairwise import cosine_distances
@@ -21,10 +22,13 @@ class Finder:
         self.word_to_distances = {}
 
     def get_distances(self, word: str):
-        word_id = self.words.index(word)
+        try:
+            word_id = self.words.index(word)
+        except ValueError:
+            return None
         return cosine_distances([self.embeddings[word_id]], self.embeddings)[0]
 
-    def find_closest(self, word_id: int, mask=None, top=10): # Not used
+    def find_closest(self, word_id: int, mask=None, top=10):  # Not used
         if mask is None:
             mask = np.array([True] * len(self.words))
 
@@ -39,23 +43,45 @@ class Finder:
 
         return real_top
 
+    def get_word_to_distances(self, guesses: List[Tuple[str, int]]):
+        word_to_distances = {}
+
+        for word, _ in guesses:
+            dists = self.get_distances(word)
+            if dists is not None:
+                word_to_distances[word] = dists
+
+        return word_to_distances
+
     def add_result(self, word, order):
         self.results.append((word, order))
         self.word_to_distances[word] = self.get_distances(word)
 
-    def sample_score(self, min_gap=0.1, num_samples=50):
+    def sample_score(self, min_gap=0.1, num_samples=50, guesses=None, word_to_distances=None):
+        if guesses is None:
+            guesses = self.results
+
+        if word_to_distances is None:
+            word_to_distances = self.word_to_distances
+
+        guesses = [
+            (word, order)
+            for word, order in guesses
+            if word in word_to_distances
+        ]
+
         scores = np.zeros(len(self.words))
 
         for _ in range(0, num_samples):
 
-            word_a, order_a = random.choice(self.results)
-            word_b, order_b = random.choice(self.results)
+            word_a, order_a = random.choice(guesses)
+            word_b, order_b = random.choice(guesses)
 
             if order_a < order_b * (1.0 - min_gap):
-                scores += (self.word_to_distances[word_a] - self.word_to_distances[word_b] < 0)
+                scores += (word_to_distances[word_a] - word_to_distances[word_b] < 0)
 
             if order_a > order_b * (1.0 + min_gap):
-                scores += (self.word_to_distances[word_a] - self.word_to_distances[word_b] > 0)
+                scores += (word_to_distances[word_a] - word_to_distances[word_b] > 0)
 
         top_score = max(scores)
         # top_score = np.percentile(scores, 90)
@@ -63,7 +89,7 @@ class Finder:
         while True:
             mask = scores >= top_score
 
-            for word, _ in self.results:
+            for word, _ in guesses:
                 word_id = self.words.index(word)
                 mask[word_id] = False
 
@@ -75,8 +101,8 @@ class Finder:
 
         return closest_ids
 
-    def guess_next(self):
-        closest = self.sample_score(min_gap=0.5, num_samples=500)
+    def guess_next(self, guesses=None, word_to_distances=None):
+        closest = self.sample_score(min_gap=0.5, num_samples=500, guesses=guesses, word_to_distances=word_to_distances)
         return self.words[closest[0]]
 
 
@@ -118,5 +144,3 @@ if __name__ == '__main__':
             continue
 
         finder.add_result(next_word, order)
-
-
