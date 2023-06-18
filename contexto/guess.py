@@ -57,6 +57,39 @@ class Finder:
         self.results.append((word, order))
         self.word_to_distances[word] = self.get_distances(word)
 
+    def get_score(self, guesses, word_to_distances, min_gap=0.1, num_samples=50):
+        scores = np.zeros(len(self.words))
+
+        for _ in range(0, num_samples):
+
+            word_a, order_a = random.choice(guesses)
+            word_b, order_b = random.choice(guesses)
+
+            if order_a < order_b * (1.0 - min_gap):
+                scores += (word_to_distances[word_a] - word_to_distances[word_b] < 0)
+
+            if order_a > order_b * (1.0 + min_gap):
+                scores += (word_to_distances[word_a] - word_to_distances[word_b] > 0)
+
+        return scores
+
+    def best_scores(self, guesses, word_to_distances, top: int):
+        """ Returns a mask of the top scores of the best guess
+        """
+        best_guess_word, best_guess_rank = sorted(guesses, key=lambda x: x[1])[0]
+        best_guess_distances = word_to_distances[best_guess_word]
+        top_distances = np.argsort(best_guess_distances)[:top]
+        top_distances_mask = np.zeros(len(self.words), dtype=bool)
+        top_distances_mask[top_distances] = True
+        return top_distances_mask
+
+    def already_guessed_mask(self, guesses):
+        already_guessed_mask = np.zeros(len(self.words), dtype=bool)
+        for word, _ in guesses:
+            word_id = self.words.index(word)
+            already_guessed_mask[word_id] = True
+        return already_guessed_mask
+
     def sample_score(self, min_gap=0.1, num_samples=50, guesses=None, word_to_distances=None):
         if guesses is None:
             guesses = self.results
@@ -70,18 +103,13 @@ class Finder:
             if word in word_to_distances
         ]
 
-        scores = np.zeros(len(self.words))
+        scores = self.get_score(guesses, word_to_distances, min_gap=min_gap, num_samples=num_samples)
 
-        for _ in range(0, num_samples):
+        already_guessed_masked = self.already_guessed_mask(guesses)
+        scores[already_guessed_masked] = 0
 
-            word_a, order_a = random.choice(guesses)
-            word_b, order_b = random.choice(guesses)
-
-            if order_a < order_b * (1.0 - min_gap):
-                scores += (word_to_distances[word_a] - word_to_distances[word_b] < 0)
-
-            if order_a > order_b * (1.0 + min_gap):
-                scores += (word_to_distances[word_a] - word_to_distances[word_b] > 0)
+        best_scores_masked = self.best_scores(guesses, word_to_distances, top=100)
+        scores[~best_scores_masked] = 0
 
         top_score = max(scores)
         # top_score = np.percentile(scores, 90)
@@ -102,7 +130,7 @@ class Finder:
         return closest_ids
 
     def guess_next(self, guesses=None, word_to_distances=None):
-        closest = self.sample_score(min_gap=0.5, num_samples=500, guesses=guesses, word_to_distances=word_to_distances)
+        closest = self.sample_score(min_gap=0.3, num_samples=500, guesses=guesses, word_to_distances=word_to_distances)
         return self.words[closest[0]]
 
 
@@ -139,6 +167,8 @@ if __name__ == '__main__':
         print(next_word)
         try:
             order = int(input('Order: '))
+            if order == 0:
+                order = None
         except ValueError as e:
             print('Invalid order')
             continue
